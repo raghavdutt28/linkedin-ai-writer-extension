@@ -18,6 +18,11 @@ export default defineContentScript({
       //refernce to last focused element, passed to App for inserting data.
       let lastFocusedEditableDiv: HTMLElement | null = null;
       let resizeScrollTimeout: number | undefined;
+      const TIMEOUT_DELAY = 250;
+      const DEBOUNCE_DELAY = 200;
+
+      const positioningListeners: { scrollHandler: EventListener; resizeHandler: EventListener }[] = [];
+
 
 
 
@@ -29,24 +34,39 @@ export default defineContentScript({
           iconContainer.style.left = `${window.scrollX + inputRect.left + inputRect.width - 32}px`;
         }
       }
-
       //debouncing logic for fast scrolling or resizing(just incase)
       function debouncePositionIcon(iconContainer: HTMLElement, messageInputField: Element) {
         if (resizeScrollTimeout) {
           // Clear the existing timeout if there's one
-          clearTimeout(resizeScrollTimeout); 
+          clearTimeout(resizeScrollTimeout);
         }
         resizeScrollTimeout = window.setTimeout(() => {
           positionIcon(iconContainer, messageInputField);
-        }, 200);
+        }, DEBOUNCE_DELAY);
       }
+      //handling them outside the injection func to decrease number of calls
+      function addPositioningListeners(iconContainer: HTMLElement, messageInputField: Element) {
+        const handleScroll = () => debouncePositionIcon(iconContainer, messageInputField);
+        const handleResize = () => debouncePositionIcon(iconContainer, messageInputField);
+        window.addEventListener('scroll', handleScroll);
+        window.addEventListener('resize', handleResize);
+        positioningListeners.push({ scrollHandler: handleScroll, resizeHandler: handleResize });
+      }
+
+      function cleanupPositioningListeners() {
+        positioningListeners.forEach(({ scrollHandler, resizeHandler }) => {
+          window.removeEventListener('scroll', scrollHandler);
+          window.removeEventListener('resize', resizeHandler);
+        });
+        positioningListeners.length = 0;
+        console.log("Cleaned up all positioning listeners.");
+      }
+
+
+
 
       //Injection function
       function injectIcon(messageInputField: Element) {
-
-        if (messageInputField.querySelector('.custom-extension-icon')) {
-          return;
-        }
 
         const iconContainer = document.createElement('div');
         iconContainer.classList.add('custom-extension-icon');
@@ -57,10 +77,18 @@ export default defineContentScript({
         //shadow dom for safe placement(Copied it from grammerly)
         const shadowRoot = iconContainer.attachShadow({ mode: 'open' });
 
+        //taiwind, custom font for shadow DOM
         const tailwindLink = document.createElement('link');
         tailwindLink.rel = 'stylesheet';
         tailwindLink.href = 'https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css';
         shadowRoot.appendChild(tailwindLink);
+
+        const fontLink = document.createElement('link');
+        fontLink.rel = 'stylesheet';
+        fontLink.href = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap";
+        shadowRoot.appendChild(fontLink);
+
+
 
         //todo: add styling for icon --done
         const appElement = createRoot(shadowRoot);
@@ -69,6 +97,7 @@ export default defineContentScript({
             lastFocusedDiv={lastFocusedEditableDiv}
             onUnmount={() => {
               iconContainer.remove();
+              cleanupPositioningListeners();
             }}
           />
         );
@@ -82,8 +111,7 @@ export default defineContentScript({
 
 
         //handling repositioning on multiple resize, scroll events
-        window.addEventListener('scroll', () => debouncePositionIcon(iconContainer, messageInputField));
-        window.addEventListener('resize', () => debouncePositionIcon(iconContainer, messageInputField));
+        addPositioningListeners(iconContainer, messageInputField)
       }
 
       function handleClickIcon(iconContainer: HTMLElement) {
@@ -109,7 +137,7 @@ export default defineContentScript({
                 injectIcon(messageInputField);
                 chrome.runtime.sendMessage({ type: 'enable_icon' });
               }
-            }, 250);
+            }, TIMEOUT_DELAY);
           });
 
           messageInputField.addEventListener('blur', function () {
@@ -122,10 +150,11 @@ export default defineContentScript({
                 if (iconContainer) {
                   chrome.runtime.sendMessage({ type: 'disable_icon' });
                   iconContainer.remove();
+                  cleanupPositioningListeners();
                   console.log('Removing icon container');
                 }
               }
-            }, 250);
+            }, TIMEOUT_DELAY);
             isIconClicked = false;
           });
         }
