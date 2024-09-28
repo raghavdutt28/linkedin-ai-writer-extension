@@ -1,6 +1,6 @@
 # WXT + React
 
-This was my first time creating a web extension in general, WXT framework. I learn't a lot while doing this assignment.
+This was my first time creating a web extension in general, WXT framework. I learnt a lot while doing this assignment.
 
 
 
